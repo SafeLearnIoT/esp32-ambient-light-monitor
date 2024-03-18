@@ -1,6 +1,7 @@
 #include "env.h"
 #include "WiFi.h"
 #include "MQTT.h"
+#include "ArduinoJson.h"
 
 #define TYPE "grove_light_sensor"
 
@@ -9,6 +10,8 @@ const char pass[] = PASSWORD_ENV;
 
 const char mqtt_host[] = MQTT_HOST_ENV;
 const int mqtt_port = MQTT_PORT_ENV;
+
+JsonDocument data;
 
 MQTTClient mqtt_client;
 WiFiClient wifi_client;

@@ -20,13 +20,16 @@ void loop() {
 
   auto analog_read = analogRead(LIGHT_SENSOR_PIN);
   auto resistance = static_cast<float>(1023-analog_read)*10/analog_read;
+  
+  data.clear();
   String topic = "/esp32/";
   topic += TYPE;
-  String output = "{ \"analog_read\": ";
-  output += analog_read;
-  output += ", \"resistance\": ";
-  output += resistance;
-  output += " }";
+  String output;
+  data["timestamp"] = millis();
+  data["analog_read"] = analog_read;
+  data["resistance"] = resistance;
+
+  serializeJson(data, output);
 
   mqtt_client.publish(topic.c_str(), output.c_str());
 
