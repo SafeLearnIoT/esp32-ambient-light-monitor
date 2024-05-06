@@ -33,15 +33,16 @@ String get_yesterdays_file_path()
 
 void read_data()
 {
-  auto analog_read = analogRead(LIGHT_SENSOR_PIN);
-  auto resistance = static_cast<float>(1023 - analog_read) * 10 / analog_read;
-
-  String output = String(comm->get_rawtime()) + ",";
-  output += String(analog_read) + ",";
-  output += String(resistance);
-  output += "\n";
   if (millis() - lastDataSaveMillis > 900000) // 600000) // 60000 - minute
   {
+    comm->resume_communication();
+    auto analog_read = analogRead(LIGHT_SENSOR_PIN);
+    auto resistance = static_cast<float>(1023 - analog_read) * 10 / analog_read;
+
+    String output = String(comm->get_rawtime()) + ",";
+    output += String(analog_read) + ",";
+    output += String(resistance);
+    output += "\n";
     lastDataSaveMillis = millis();
 
     if (!SPIFFS.exists(get_todays_file_path()))
@@ -49,12 +50,16 @@ void read_data()
       writeFile(SPIFFS, get_todays_file_path().c_str(), header.c_str());
     }
     appendFile(SPIFFS, get_todays_file_path().c_str(), output.c_str());
+    delay(5000);
+    comm->pause_communication();
   }
 }
 
 void setup()
 {
   Serial.begin(115200);
+
+  delay(10000);
 
   if (!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED))
   {
@@ -64,19 +69,28 @@ void setup()
   pinMode(LIGHT_SENSOR_PIN, INPUT);
 
   comm->setup();
+
+  delay(5000);
+
+  comm->pause_communication();
 }
 
 void loop()
 {
-  comm->handle_mqtt_loop();
+  auto current_time = comm->get_localtime();
   read_data();
 
-  auto current_time = comm->get_localtime();
   if (current_time->tm_hour == 1 && !upload_init)
   {
+    Serial.println("Start reading data");
+    comm->resume_communication();
+    delay(5000);
+    comm->handle_mqtt_loop();
     upload_init = true;
     comm->publish("data", readFile(SPIFFS, get_yesterdays_file_path().c_str()));
     checkAndCleanFileSystem(SPIFFS);
+    delay(5000);
+    comm->pause_communication();
   }
   if (current_time->tm_hour == 2 && upload_init)
   {
