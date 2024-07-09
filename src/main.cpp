@@ -3,6 +3,7 @@
 
 #include "env.h"
 #include "communication.h"
+#include "rtpnn.h"
 #include "data.h"
 
 #define LIGHT_SENSOR_PIN A1
@@ -15,56 +16,15 @@ void callback(String &topic, String &payload)
   Serial.println(payload);
 }
 
-auto comm = Communication::get_instance(SSID_ENV, PASSWORD_ENV, "esp32/light/", MQTT_HOST_ENV, MQTT_PORT_ENV, callback);
-
 unsigned long lastDataSaveMillis = 0;
-bool upload_init = false;
-String header = "timestamp,analog_read,resistance\n";
 
-String get_todays_file_path()
-{
-  return "/" + comm->get_todays_date_string() + ".csv";
-};
+rTPNN::SDP<uint16_t> analog_read_sdp(rTPNN::SDPType::Light);
 
-String get_yesterdays_file_path()
-{
-  return "/" + comm->get_yesterdays_date_string() + ".csv";
-};
-
-void read_data()
-{
-  if (millis() - lastDataSaveMillis > 900000) // 600000) // 60000 - minute
-  {
-    comm->resume_communication();
-    auto analog_read = analogRead(LIGHT_SENSOR_PIN);
-    auto resistance = static_cast<float>(1023 - analog_read) * 10 / analog_read;
-
-    String output = String(comm->get_rawtime()) + ",";
-    output += String(analog_read) + ",";
-    output += String(resistance);
-    output += "\n";
-    lastDataSaveMillis = millis();
-
-    if (!SPIFFS.exists(get_todays_file_path()))
-    {
-      writeFile(SPIFFS, get_todays_file_path().c_str(), header.c_str());
-    }
-    appendFile(SPIFFS, get_todays_file_path().c_str(), output.c_str());
-    delay(5000);
-    comm->pause_communication();
-  }
-}
+auto comm = Communication::get_instance(SSID_ENV, PASSWORD_ENV, "esp32/light/", MQTT_HOST_ENV, MQTT_PORT_ENV, callback);
 
 void setup()
 {
   Serial.begin(115200);
-
-  delay(10000);
-
-  if (!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED))
-  {
-    Serial.println("SPIFFS Mount Failed");
-  }
 
   pinMode(LIGHT_SENSOR_PIN, INPUT);
 
@@ -77,33 +37,30 @@ void setup()
 
 void loop()
 {
-  auto current_time = comm->get_localtime();
-  read_data();
-
-  if (current_time->tm_hour == 1 && !upload_init)
+  if (millis() - lastDataSaveMillis > 60000) // 600000) // 60000 - minute
   {
-    Serial.println("Start reading data");
-    comm->resume_communication();
-    delay(5000);
-    comm->handle_mqtt_loop();
-    upload_init = true;
-    comm->publish("data", readFile(SPIFFS, get_yesterdays_file_path().c_str()));
-    checkAndCleanFileSystem(SPIFFS);
-    delay(5000);
-    comm->pause_communication();
-  }
-  if (current_time->tm_hour == 2 && upload_init)
-  {
-    listDir(SPIFFS, "/", 0);
-    upload_init = false;
-  }
+    lastDataSaveMillis = millis();
+    auto analog_read = analogRead(LIGHT_SENSOR_PIN);
 
-  // if (millis() - lastDataUploadMillis > 60000)
-  // {
-  //   lastDataUploadMillis = millis();
-  //   if (SPIFFS.exists(get_todays_file_path()))
-  //   {
-  //     comm->publish("data", readFile(SPIFFS, get_todays_file_path().c_str()));
-  //   }
-  // }
+    JsonDocument sensor_data;
+    sensor_data["time"] = comm->get_rawtime();
+    sensor_data["device"] = comm->get_client_id();
+    JsonObject detail_sensor_data = sensor_data["data"].to<JsonObject>();
+    detail_sensor_data["analog_read"] = analog_read;
+
+    JsonDocument rtpnn_data;
+    rtpnn_data["time"] = comm->get_rawtime();
+    rtpnn_data["device"] = comm->get_client_id();
+    rtpnn_data["ml_algo"] = "rtpnn";
+    JsonObject detail_rtpnn_data = rtpnn_data["data"].to<JsonObject>();
+
+    JsonObject analog_read_data = detail_rtpnn_data["analog_read"].to<JsonObject>();
+    auto analog_read_calc = analog_read_sdp.execute_sdp(analog_read);
+    analog_read_data["trend"] = analog_read_calc.first;
+    analog_read_data["level"] = analog_read_calc.second;
+
+    JsonDocument reglin_data;
+
+    comm->send_data(sensor_data, rtpnn_data, reglin_data);
+  }
 }
